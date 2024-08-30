@@ -13,7 +13,11 @@ class HrPaylip(models.Model):
 
     def _obtain_tasks(self):
         xma_task= self.env['xma.task.activity'] 
-        return xma_task.search([('date', '>=', self.date_from), ('date', '<=', self.date_to), ('employee_id','=', self.employee_id.id)])
+        return xma_task.search([
+                    ('date', '>=', self.date_from),
+                    ('date', '<=', self.date_to),
+                    ('employee_id','=', self.employee_id.id)
+                ])
 
     def _compute_valor_tarea(self):
         xma_task_ids = self._obtain_tasks()
@@ -30,13 +34,30 @@ class HrPaylip(models.Model):
 
     def _compute_septimo(self):
         xma_task_ids = self._obtain_tasks()
-        days = [task.date.date() for task in xma_task_ids]
-        if len(set(days)) < 6:
+        dias_tareas = [task.date.date() for task in xma_task_ids]
+        dias_necesarios = 6 - self._cantidad_asuetos()
+        if len(set(dias_tareas)) < dias_necesarios:
             self.septimo = 0
         else:
-            self.septimo = sum(xma_task_ids.mapped('total'))/len(set(days))
+            self.septimo = sum(xma_task_ids.mapped('total'))/len(set(dias_tareas))
 
     def _compute_asuetos(self):
+        cant_asuetos = self._cantidad_asuetos()
+        if cant_asuetos == 0:
+            self.asuetos = 0
+        else:
+            inicio_semana = self.date_from - timedelta(days=7)
+            final_semana = self.date_to - timedelta(days=7)
+            xma_task = self.env['xma.task.activity']
+            xma_task_ids = xma_task.search([
+                ('date', '>=', inicio_semana),
+                ('date', '<=', final_semana),
+                ('employee_id', '=', self.employee_id.id)
+            ])
+            valor_tarea_pasado = sum(xma_task_ids.mapped('total'))
+            self.asuetos = cant_asuetos * (valor_tarea_pasado/6)
+
+    def _cantidad_asuetos(self):
         cant_asuetos = 0
         resource_calendar_leaves = self.env['resource.calendar.leaves']
         
@@ -52,17 +73,4 @@ class HrPaylip(models.Model):
             if inicio_festivo <= final_festivo:
                 dias_festivos = (final_festivo - inicio_festivo).days + 1
                 cant_asuetos += dias_festivos
-        
-        if cant_asuetos == 0:
-            self.asuetos = 0
-        else:
-            inicio_semana = self.date_from - timedelta(days=7)
-            final_semana = self.date_to - timedelta(days=7)
-            xma_task = self.env['xma.task.activity']
-            xma_task_ids = xma_task.search([
-                ('date', '>=', inicio_semana),
-                ('date', '<=', final_semana),
-                ('employee_id', '=', self.employee_id.id)
-            ])
-            valor_tarea_pasado = sum(xma_task_ids.mapped('total'))
-            self.asuetos = cant_asuetos * (valor_tarea_pasado/6)
+        return cant_asuetos
