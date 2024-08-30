@@ -9,7 +9,7 @@
         'base',
         'hr_payroll',
         'hr',
-        'xma-agricola',
+        'xma_agricola',
     ],
     'installable': True,
     'auto_install': False,
