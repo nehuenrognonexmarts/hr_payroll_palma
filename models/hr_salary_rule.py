@@ -1,5 +1,5 @@
 from odoo import models, fields
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 
 class HrPaylip(models.Model):
@@ -12,12 +12,14 @@ class HrPaylip(models.Model):
     asuetos = fields.Float("Asuetos", compute="_compute_asuetos")
 
     def _obtain_tasks(self):
-        xma_task= self.env['xma.task.activity'] 
-        return xma_task.search([
+        xma_task= self.env['xma.task.activity']
+        tasks = xma_task.search([
                     ('date', '>=', self.date_from),
                     ('date', '<=', self.date_to),
                     ('employee_id','=', self.employee_id.id)
                 ])
+        no_sundays = tasks.filtered(lambda t: datetime.strptime(t.date, '%Y-%m-%d').weekday() != 6)
+        return no_sundays
 
     def _compute_valor_tarea(self):
         xma_task_ids = self._obtain_tasks()
@@ -36,6 +38,9 @@ class HrPaylip(models.Model):
         xma_task_ids = self._obtain_tasks()
         dias_tareas = [task.date.date() for task in xma_task_ids]
         dias_necesarios = 6 - self._cantidad_asuetos()
+        semanas_trabajadas = self._organizacion_por_semanas(xma_task_ids)
+        for semana in semanas_trabajadas:
+            skip = "aun tengo que programar aqui"
         if len(set(dias_tareas)) < dias_necesarios:
             self.septimo = 0
         else:
@@ -54,6 +59,8 @@ class HrPaylip(models.Model):
                 ('date', '<=', final_semana),
                 ('employee_id', '=', self.employee_id.id)
             ])
+            #acá puedo llamar al payslip anterior.
+            #luego consulto sus campos
             valor_tarea_pasado = sum(xma_task_ids.mapped('total'))
             self.asuetos = cant_asuetos * (valor_tarea_pasado/6)
 
@@ -74,3 +81,34 @@ class HrPaylip(models.Model):
                 dias_festivos = (final_festivo - inicio_festivo).days + 1
                 cant_asuetos += dias_festivos
         return cant_asuetos
+    
+    def _obtener_payslip_pasado(self):
+        inicio_semana = self.date_from - timedelta(days=7)
+        payslips = self.env['hr.payslip'].search([
+            ('date_from', '=', inicio_semana),
+            ('employee_id','=', self.employee_id.id)
+        ])
+
+    def _organizacion_por_semanas(self, tareas):
+        tareas_ordenadas = tareas.sorted(key=lambda t: t.date)
+        semanas = []
+        semana_actual = []
+        fecha_inicio_semana = None
+        for tarea in tareas_ordenadas:
+            fecha_tarea = tarea.date
+            inicio_semana_tarea = fecha_tarea - timedelta(days=fecha_tarea.weekday())
+            
+            if fecha_inicio_semana is None:
+                fecha_inicio_semana = inicio_semana_tarea
+
+            if inicio_semana_tarea != fecha_inicio_semana:
+                semanas.append(semana_actual)
+                semana_actual = []
+                fecha_inicio_semana = inicio_semana_tarea
+            semana_actual.append(tarea)
+
+        if semana_actual:
+            semanas.append(semana_actual)
+
+        return semanas
+            
