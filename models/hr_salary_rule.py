@@ -36,35 +36,56 @@ class HrPaylip(models.Model):
 
     def _compute_septimo(self):
         xma_task_ids = self._obtain_tasks()
-        dias_tareas = [task.date.date() for task in xma_task_ids]
-        dias_necesarios = 6 - self._cantidad_asuetos()
         semanas_trabajadas = self._organizacion_por_semanas(xma_task_ids)
+        valor_septimos = 0
         for semana in semanas_trabajadas:
-            skip = "aun tengo que programar aqui"
-        if len(set(dias_tareas)) < dias_necesarios:
-            self.septimo = 0
-        else:
-            self.septimo = sum(xma_task_ids.mapped('total'))/len(set(dias_tareas))
+            inicio = semana[0].date
+            fin = semana[-1].date
+            # asuetos = self._obtener_asuetos(inicio,fin)
+            dias_trabajados = len([tarea.date.date() for tarea in semana].set())
+            dias_necesarios = 6 - self._cantidad_asuetos(inicio, fin)
+            #problema. si trabajo un domingo no se toma en cuenta la tarifa del domingo
+            #deberia excluir domingos?
+            if dias_trabajados >= dias_necesarios:
+                valor_septimos += sum(xma_task_ids.mapped('total'))/dias_trabajados
+
+        self.septimo = valor_septimos
 
     def _compute_asuetos(self):
-        cant_asuetos = self._cantidad_asuetos()
-        if cant_asuetos == 0:
-            self.asuetos = 0
-        else:
-            inicio_semana = self.date_from - timedelta(days=7)
-            final_semana = self.date_to - timedelta(days=7)
-            xma_task = self.env['xma.task.activity']
-            xma_task_ids = xma_task.search([
-                ('date', '>=', inicio_semana),
-                ('date', '<=', final_semana),
-                ('employee_id', '=', self.employee_id.id)
-            ])
-            #acá puedo llamar al payslip anterior.
-            #luego consulto sus campos
-            valor_tarea_pasado = sum(xma_task_ids.mapped('total'))
-            self.asuetos = cant_asuetos * (valor_tarea_pasado/6)
+        inicio_semana = self.date_from
+        final_semana = self.date_from + timedelta(days=6)
+        valor_asuetos = 0
+        while inicio_semana < self.date_to:
+            cant_asuetos = self._cantidad_asuetos(inicio_semana, final_semana)
+            if cant_asuetos > 0:
+                inicio_semana_pasada = self.date_from - timedelta(days=7)
+                final_semana_pasada = self.date_to - timedelta(days=7)
+                xma_task = self.env['xma.task.activity']
+                xma_task_ids = xma_task.search([
+                    ('date', '>=', inicio_semana_pasada),
+                    ('date', '<=', final_semana_pasada),
+                    ('employee_id', '=', self.employee_id.id)
+                ])
+                valor_tarea_pasado = sum(xma_task_ids.mapped('total'))
+                # incentivo no se puede agregar, por que no esta asociado a una semana.
+                # extraordinario no se puede agregar por que no esta asociado a una semana.
+                # asuetos pasados
+                trabajo_dominical = 0 #necesito el codigo de trabajo dominical
+                valor_asuetos += cant_asuetos * ((valor_tarea_pasado + trabajo_dominical)/6)
+            inicio_semana += timedelta(days=7)
+            final_semana += timedelta(days=7)
+        self.asuetos = valor_asuetos
 
-    def _cantidad_asuetos(self):
+    def _obtener_asuetos_trabajados(self, inicio, fin):
+        resource_calendar_leaves = self.env['resource.calendar.leaves']
+        calendar_leaves = resource_calendar_leaves.search([
+            ('date_to', '>=', inicio),
+            ('date_from', '<=', fin),
+        ])
+        return calendar_leaves
+        # return calendar_leaves.sorted(key=lambda t: t.date_to)
+
+    def _cantidad_asuetos(self, calendar_leaves):
         cant_asuetos = 0
         resource_calendar_leaves = self.env['resource.calendar.leaves']
         
@@ -83,7 +104,8 @@ class HrPaylip(models.Model):
         return cant_asuetos
     
     def _obtener_payslip_pasado(self):
-        inicio_semana = self.date_from - timedelta(days=7)
+        inicio_semana = self.date_from - timedelta(days=14)
+        #preguntar si siempre va a ser 14 días atras
         payslips = self.env['hr.payslip'].search([
             ('date_from', '=', inicio_semana),
             ('employee_id','=', self.employee_id.id)
