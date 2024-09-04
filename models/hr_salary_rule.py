@@ -18,8 +18,8 @@ class HrPaylip(models.Model):
                     ('date', '<=', self.date_to),
                     ('employee_id','=', self.employee_id.id)
                 ])
-        no_sundays = tasks.filtered(lambda t: datetime.strptime(t.date, '%Y-%m-%d').weekday() != 6)
-        return no_sundays
+        no_sundays = tasks.filtered(lambda t: t.date.weekday() != 6)
+        return no_sundays   
 
     def _compute_valor_tarea(self):
         xma_task_ids = self._obtain_tasks()
@@ -39,15 +39,15 @@ class HrPaylip(models.Model):
         semanas_trabajadas = self._organizacion_por_semanas(xma_task_ids)
         valor_septimos = 0
         for semana in semanas_trabajadas:
-            inicio = semana[0].date
-            fin = semana[-1].date
+            inicio = semana[0].date.date()
+            fin = semana[-1].date.date()
             # asuetos = self._obtener_asuetos(inicio,fin)
-            dias_trabajados = len([tarea.date.date() for tarea in semana].set())
+            dias_trabajados = len(set([tarea.date.date() for tarea in semana]))
             dias_necesarios = 6 - self._cantidad_asuetos(inicio, fin)
             #problema. si trabajo un domingo no se toma en cuenta la tarifa del domingo
             #deberia excluir domingos?
             if dias_trabajados >= dias_necesarios:
-                valor_septimos += sum(xma_task_ids.mapped('total'))/dias_trabajados
+                valor_septimos += sum(tarea.total for tarea in semana)/dias_trabajados
 
         self.septimo = valor_septimos
 
@@ -71,7 +71,7 @@ class HrPaylip(models.Model):
                 # extraordinario no se puede agregar por que no esta asociado a una semana.
                 # asuetos pasados
                 trabajo_dominical = 0 #necesito el codigo de trabajo dominical
-                valor_asuetos += cant_asuetos * ((valor_tarea_pasado + trabajo_dominical)/6)
+                valor_asuetos += cant_asuetos * ((valor_tarea_pasado)/6)
             inicio_semana += timedelta(days=7)
             final_semana += timedelta(days=7)
         self.asuetos = valor_asuetos
@@ -85,18 +85,17 @@ class HrPaylip(models.Model):
         return calendar_leaves
         # return calendar_leaves.sorted(key=lambda t: t.date_to)
 
-    def _cantidad_asuetos(self, calendar_leaves):
+    def _cantidad_asuetos(self, inicio, fin):
         cant_asuetos = 0
         resource_calendar_leaves = self.env['resource.calendar.leaves']
-        
         calendar_leaves = resource_calendar_leaves.search([
-            ('date_to', '>=', self.date_from),
-            ('date_from', '<=', self.date_to),
+            ('date_to', '>=', inicio),
+            ('date_from', '<=', fin),
         ])
 
         for leave in calendar_leaves:
-            inicio_festivo = max(self.date_from, leave.date_from.date())
-            final_festivo = min(self.date_to, leave.date_to.date())
+            inicio_festivo = max(inicio, leave.date_from.date())
+            final_festivo = min(fin, leave.date_to.date())
 
             if inicio_festivo <= final_festivo:
                 dias_festivos = (final_festivo - inicio_festivo).days + 1
@@ -117,7 +116,7 @@ class HrPaylip(models.Model):
         semana_actual = []
         fecha_inicio_semana = None
         for tarea in tareas_ordenadas:
-            fecha_tarea = tarea.date
+            fecha_tarea = tarea.date.date()
             inicio_semana_tarea = fecha_tarea - timedelta(days=fecha_tarea.weekday())
             
             if fecha_inicio_semana is None:
